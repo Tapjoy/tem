@@ -12,7 +12,15 @@ $ echo 'source ~/.em.sh' >> ~/.bash_profile # Or .zsh_profile if you use zshell
 $ exec $SHELL
 ```
 
-You should now be able to call `em`.
+You should now be able to call `aam`, `cem`, and `sem`.
+
+## Customization
+
+AAM uses it's own variables to define default accounts and where files should be stored. These can be overridden, but
+sane defaults are provided.
+
+* `EM_SCRIPT` is the location of em.sh (`$0`)
+* `EM_STORE` is the folder where account definitions are stored (`$HOME/.em`).
 
 ## Functions
 ### AWS Account Manager
@@ -75,7 +83,7 @@ the setup of these variables and files automatically.
 AAM uses it's own variables to define default accounts and where files should be stored. These can be overridden, but
 sane defaults are provided.
 
-* `AAM_STORE` is the folder where account definitions are stored (`$HOME/.em/aws`).
+* `AAM_STORE` is the folder where account definitions are stored (`$EM_STORE/aws`).
 * `AAM_DEFAULT_FILE` is the file where the default account is stored (`$AAM_STORE/.default`).
 * `AAM_DEFAULT_EC2_CREDS` is the default for `AWS_CREDENTIALS_FILE` (`$HOME/.ec2.creds`).
 
@@ -98,6 +106,27 @@ Usage:
   cem list                      Show all available accounts
 ```
 
+#### Creating an Account
+
+Once CEM has been installed you can start by creating and editing new profile override:
+
+```
+$ cem create personal
+$ $EDITOR $CEM_STORE/personal
+```
+
+Profile override files are simply a list of variables which chef references whenver you run `knife`.
+
+For profile override file reference: http://docs.opscode.com/config_rb_knife.html
+
+#### Customization
+
+CEM uses its own variables to define default profiles and where files should be stored. These can be overridden, but
+sane defaults are provided.
+
+* `CEM_STORE` is the folder where account definitions are stored (`$EM_STORE/chef`).
+* `CEM_DEFAULT_FILE` is the file where the default account is stored (`$CEM_STORE/.default`).
+
 ### Shell Environment Manager
 The Shell Environment Manager is a shell function that manages multiple shell environments. It provides a
 mechanism for running commands under a different account without switching your local shell's context.  All common settings should go into your normal rc files, but special settings can go into $SEM_STORE.
@@ -115,3 +144,22 @@ Usage:
   sem default <account>         Set the default account
   sem list                      Show all available accounts
 ```
+
+#### Creating an Account
+
+Once SEM has been installed you can start by creating and editing new profile override:
+
+```
+$ sem create personal
+$ $EDITOR $SEM_STORE/personal
+```
+
+Anything goes as long as your shell can process the file.
+
+#### Customization
+
+SEM uses its own variables to define default environments and where files should be stored. These can be overridden, but
+sane defaults are provided.
+
+* `SEM_STORE` is the folder where account definitions are stored (`$EM_STORE/env`).
+* `SEM_DEFAULT_FILE` is the file where the default account is stored (`$SEM_STORE/.default`).
