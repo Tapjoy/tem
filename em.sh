@@ -32,14 +32,14 @@ if [ -z $CEM_DEFAULT ]; then
   fi
 fi
 
-# General ENV stuff
-[ -z $TEM_STORE ] && export TEM_STORE=$EM_STORE/env
-[ -d $TEM_STORE ] || mkdir -p $TEM_STORE
-[ -z $TEM_DEFAULT_FILE ] && export TEM_DEFAULT_FILE=${TEM_STORE}/.default
+# Shell ENV stuff
+[ -z $SEM_STORE ] && export SEM_STORE=$EM_STORE/env
+[ -d $SEM_STORE ] || mkdir -p $SEM_STORE
+[ -z $SEM_DEFAULT_FILE ] && export SEM_DEFAULT_FILE=${SEM_STORE}/.default
 
-if [ -z $TEM_DEFAULT ]; then
-  if [ -f $TEM_DEFAULT_FILE ]; then
-    export TEM_DEFAULT=`cat ${TEM_DEFAULT_FILE}`
+if [ -z $SEM_DEFAULT ]; then
+  if [ -f $SEM_DEFAULT_FILE ]; then
+    export SEM_DEFAULT=`cat ${SEM_DEFAULT_FILE}`
   fi
 fi
 
@@ -55,7 +55,7 @@ em() {
       ;;
     'env')
       shift
-      tem $@
+      sem $@
       ;;
   esac
 }
@@ -415,13 +415,13 @@ EOC
   esac
 }
 ###############################################################################
-# TEM is a utility for managing multiple environments. It handles loading a   #
+# SEM is a utility for managing multiple environments. It handles loading a   #
 # default set of variables, ensures the litany of variables used by the tools #
 # are set and provides a mechanism for quickly switching between profiles.    #
 ############################################################################### 
-tem(){
-  APPLICATION_NAME='The Environment Manager'
-  COMMAND='tem'
+sem(){
+  APPLICATION_NAME='Shell Environment Manager'
+  COMMAND='sem'
   if [ ! -z $1 ]; then
     cmd=$1
     shift
@@ -451,7 +451,7 @@ tem(){
       fi
 
       account=$1
-      store=${TEM_STORE}/${account}
+      store=${SEM_STORE}/${account}
       shift
 
       if [ -f $store ]; then
@@ -473,7 +473,7 @@ tem(){
       fi
 
       account=$1
-      store=${TEM_STORE}/${account}
+      store=${SEM_STORE}/${account}
       shift
 
       if [ -f $store ]; then
@@ -497,21 +497,21 @@ tem(){
       shift
 
       if [ $account = 'default' ]; then
-        if [ -z $TEM_DEFAULT ]; then
+        if [ -z $SEM_DEFAULT ]; then
           echo "No default account has been configured. Set one with aam default <account>."
           return 1
         fi
-        account=$TEM_DEFAULT
+        account=$SEM_DEFAULT
       fi
 
-      store=${TEM_STORE}/${account}
+      store=${SEM_STORE}/${account}
       if [ ! -f $store ]; then
         echo "No account named ${account}"
         return 1
       fi
 
-      old_store=${TEM_STORE}/${TEM_ACCOUNT}
-      export TEM_ACCOUNT=$account
+      old_store=${SEM_STORE}/${SEM_ACCOUNT}
+      export SEM_ACCOUNT=$account
       for key in $(awk -F'[#=\ ]' '$1 ~ /export/ {print $2}' ${old_store}); do
         unset $key
       done
@@ -527,7 +527,7 @@ tem(){
       fi
 
       account=$1
-      store=${TEM_STORE}/${account}
+      store=${SEM_STORE}/${account}
       shift
       command=$*
 
@@ -547,7 +547,7 @@ tem(){
       fi
 
       account=$1
-      store=${TEM_STORE}/${account}
+      store=${SEM_STORE}/${account}
       shift
 
       if [ ! -f $store ]; then
@@ -555,20 +555,20 @@ tem(){
         return 1
       fi
 
-      echo $account > $TEM_DEFAULT_FILE
+      echo $account > $SEM_DEFAULT_FILE
       echo "Default account set to ${account}"
       ;;
     "list" )
       echo
       echo "Available accounts"
-      for account in $(ls $TEM_STORE); do
+      for account in $(ls $SEM_STORE); do
         local ind=''
-        if [ "$account" = "$TEM_ACCOUNT" ]; then
+        if [ "$account" = "$SEM_ACCOUNT" ]; then
           ind='='
-          [ "$account" = "$TEM_DEFAULT" ] && ind+='*' || ind+='>'
+          [ "$account" = "$SEM_DEFAULT" ] && ind+='*' || ind+='>'
         else
           ind=' '
-          [ "$account" = "$TEM_DEFAULT" ] && ind+='*' || ind+=' '
+          [ "$account" = "$SEM_DEFAULT" ] && ind+='*' || ind+=' '
         fi
 
         echo "${ind} ${account}"
@@ -588,6 +588,6 @@ if [ -z $CEM_ACCOUNT ]; then
   cem use default > /dev/null
 fi
 
-if [ -z $TEM_ACCOUNT ]; then
-  tem use default > /dev/null
+if [ -z $SEM_ACCOUNT ]; then
+  sem use default > /dev/null
 fi
