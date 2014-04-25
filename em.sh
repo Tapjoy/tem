@@ -5,589 +5,330 @@
 [ -z $EM_SCRIPT ] && export EM_SCRIPT=$0
 [ -z $EM_STORE ] && export EM_STORE=$HOME/.em
 
-# AWS ENV Stuff
-[ -z $AAM_STORE ] && export AAM_STORE=$EM_STORE/aws
-[ -d $AAM_STORE ] || mkdir -p $AAM_STORE
-[ -z $AAM_DEFAULT_FILE ] && export AAM_DEFAULT_FILE=${AAM_STORE}/.default
-
-[ -z $EC2_HOME ]              && export EC2_HOME="/usr/share/ec2-api-tools"
-[ -z $AWS_AUTO_SCALING_HOME ] && export AWS_AUTO_SCALING_HOME="/usr/share/as-api-tools"
-[ -z $AWS_CLOUDWATCH_HOME ]   && export AWS_CLOUDWATCH_HOME="/usr/share/cloudwatch-api-tools"
-[ -z $AAM_DEFAULT_EC2_CREDS ] && export AAM_DEFAULT_EC2_CREDS="$HOME/.ec2.creds"
-
-if [ -z $AAM_DEFAULT ]; then
-  if [ -f $AAM_DEFAULT_FILE ]; then
-    export AAM_DEFAULT=`cat ${AAM_DEFAULT_FILE}`
-  fi
-fi
-
-# Chef ENV Stuff
-[ -z $CEM_STORE ] && export CEM_STORE=$EM_STORE/chef
-[ -d $CEM_STORE ] || mkdir -p $CEM_STORE
-[ -z $CEM_DEFAULT_FILE ] && export CEM_DEFAULT_FILE=${CEM_STORE}/.default
-
-if [ -z $CEM_DEFAULT ]; then
-  if [ -f $CEM_DEFAULT_FILE ]; then
-    export CEM_DEFAULT=`cat ${CEM_DEFAULT_FILE}`
-  fi
-fi
-
-# Shell ENV stuff
-[ -z $SEM_STORE ] && export SEM_STORE=$EM_STORE/env
-[ -d $SEM_STORE ] || mkdir -p $SEM_STORE
-[ -z $SEM_DEFAULT_FILE ] && export SEM_DEFAULT_FILE=${SEM_STORE}/.default
-
-if [ -z $SEM_DEFAULT ]; then
-  if [ -f $SEM_DEFAULT_FILE ]; then
-    export SEM_DEFAULT=`cat ${SEM_DEFAULT_FILE}`
-  fi
-fi
-
 em() {
+  # Special cases that don't require a type to be set
   case $1 in
-    'aws')
-      shift
-      aam $@
-      ;;
-    'chef')
-      shift
-      cem $@
-      ;;
-    'env')
-      shift
-      sem $@
+    'list'|'init')
+      for type in $(find $EM_STORE -depth 1 -type d); do
+        em ${type##*/} $1
+      done
+      return 0
       ;;
   esac
-}
-##############################################################################
-# AAM is a utility for managing multiple AWS account credentials. It handles #
-# loading a default set of credentials, ensures the litany of variables used #
-# by the tools are set and provides a mechanism for quickly switching        #
-# between accounts.                                                          #
-##############################################################################
 
-aam() {
-  APPLICATION_NAME='AWS Account Manager'
-  COMMAND='aam'
-  if [ ! -z $1 ]; then
-    cmd=$1
-    shift
-  else
-    cmd='help'
+  if [ -z $1 ] || [ -z $2 ]; then
+    _em_command_help
+    return
   fi
-  case $cmd in
-    "help" )
-      echo "${APPLICATION_NAME}"
-      echo
-      echo "Usage:"
-      echo "  ${COMMAND} help                      Show this message"
-      echo "  ${COMMAND} create <account>          Create a new AWS account"
-      echo "  ${COMMAND} remove <account>          Remove AWS account"
-      echo "  ${COMMAND} use <account>             Use the named AWS account"
-      echo "  ${COMMAND} do <account> <command...> Run a command under the given account"
-      echo "  ${COMMAND} default <account>         Set the default account"
-      echo "  ${COMMAND} list                      Show all available accounts"
-      echo
-      ;;
-    "create" )
-      local account
-      local store
 
-      if [ $# -lt 1 ]; then
-        echo "Usage: ${COMMAND} create <account>"
-        return 1
-      fi
+  declare -A EM_VARS
+  _em_setup $1 $2; shift; shift;
 
-      account=$1
-      store=${AAM_STORE}/${account}
-      shift
+  # First we try to run _em_{type}_{cmd} then fall back to _em_{cmd}
+  _em_maybe_fn "_em_command_${EM_VARS[type]}_${EM_VARS[cmd]}" $@ || _em_maybe_fn "_em_command_${EM_VARS[cmd]}" $@
 
-      if [ -f $store ]; then
-        echo "AWS account named ${account} already exists!"
-        return 1
-      fi
+  if [ $? -gt 0 ]; then
+    echo "Invalid command: ${EM_VARS[type]} ${EM_VARS[cmd]}!"
+    return 1
+  fi
+}
 
-      cat > $store <<EOC
+_em_command_help() {
+  echo "Usage: em [type] [command]"
+  echo
+  echo "Global Commands (no type)"
+  echo "  init                      Run init for all types found under ${EM_STORE}"
+  echo "  list                      Run list for all types found under ${EM_STORE}"
+  echo
+  echo "Default Type Commands"
+  echo "  init                      Load the default profile if one is set"
+  echo "  create <profile>          Create an profile for this type"
+  echo "  remove <profile>          Remove an profile from this type"
+  echo "  list                      List all profiles for this type"
+  echo "  use <profile>             Use the given profile for the current shell"
+  echo "  unset                     Unset the current profile and remove all variables"
+  echo "  do <profile> <command...> Run a command under the given profile"
+  echo "  default <profile>         Show all available profiles"
+}
+_em_command_create() {
+  if [ $# -lt 1 ]; then
+    echo "Usage: em ${EM_VARS[type]} create <profile>"
+    return 1
+  fi
+
+  local profile=$1
+  local store=${EM_VARS[store]}/${profile}
+
+  if [ -f $store ]; then
+    echo "${EM_VARS[type]} profile ${profile} already exists!"
+    return 1
+  fi
+
+  if ! _em_maybe_fn "_em_defaults_${EM_VARS[type]}" $store; then
+    echo "No defaults associated with ${EM_VARS[type]}, creating a blank profile."
+    touch $store
+  fi
+
+  _em_run_hook "create" $profile $store
+  echo "Profile created! Edit ${store}, switch with em ${EM_VARS[type]} use ${profile}"
+}
+_em_command_remove() {
+  if [ $# -lt 1 ]; then
+    echo "Usage: em ${EM_VARS[type]} remove <profile>"
+    return 1
+  fi
+
+  local profile=$1
+  local store=${EM_VARS[store]}/${profile}
+
+  if [ ! -f $store ]; then
+    echo "${EM_VARS[type]} profile ${profile} does not exist!"
+    return 1
+  fi
+
+  if [ "${EM_VARS[profile]}" = "${profile}" ]; then
+    em ${EM_VARS[type]} unset
+  fi
+
+  rm -f $store
+  _em_run_hook "remove" $profile $store
+  echo "profile ${profile} removed!"
+}
+_em_command_use() {
+  if [ $# -lt 1 ]; then
+    echo "Usage: em ${EM_VARS[type]} use <profile>"
+    return 1
+  fi
+
+  local profile=$1
+  local store=${EM_VARS[store]}/$profile
+
+  if [ "$profile" = "${EM_VARS[profile]}" ]; then
+    echo "Already on ${EM_VARS[type]} ${profile}"
+    return 0
+  fi
+
+  if [ ! -f $store ]; then
+    echo "No profile named ${profile} for ${EM_VARS[type]}"
+    return 1
+  fi
+
+  em ${EM_VARS[type]} unset
+
+  source $store
+  _em_run_hook "use" $profile $store
+
+  eval "export EM_${EM_VARS[code]}_PROFILE=$profile"
+  echo "Switched to ${EM_VARS[type]} ${profile}"
+}
+_em_command_unset() {
+  if [ -z ${EM_VARS[profile]} ]; then
+    return 0
+  fi
+
+  local profile=${EM_VARS[profile]}
+  local store=${EM_VARS[store]}/${EM_VARS[profile]}
+
+  _em_debug "Unset profile ${profile}"
+
+  if [ -f $store ]; then
+    for key in $(awk -F '[#=\ ]' '$1 ~ /export/ {print $2}' $store); do
+      _em_debug "unset ${key}"
+      unset $key
+    done
+  fi
+
+  _em_run_hook "unset" $profile $store
+  eval "unset EM_${EM_VARS[code]}_PROFILE"
+}
+_em_command_do() {
+  if [ $# -lt 1 ]; then
+    echo "Usage: em ${EM_VARS[type]} do <profile> <command...>"
+    return 1
+  fi
+
+  local profile=$1
+  local store=${EM_VARS[store]}/$profile
+  shift
+  local command=$*
+
+  if [ ! -f $store ]; then
+    echo "No profile named ${profile} for ${EM_VARS[type]}"
+    return 1
+  fi
+
+  _em_run_hook "do" $profile $store
+  $SHELL -l -c "source ${EM_SCRIPT}; em ${EM_VARS[type]} use ${profile}; ${command}"
+}
+_em_command_init() {
+  if [ -z ${EM_VARS[profile]} ]; then
+    if [ ! -z ${EM_VARS[default]} ]; then
+      em ${EM_VARS[type]} use ${EM_VARS[default]}
+    fi
+  fi
+}
+_em_command_default() {
+  if [ $# -lt 1 ]; then
+    echo "Usage: em ${EM_VARS[type]} default <profile>"
+    return 1
+  fi
+
+  local profile=$1
+  local store=${EM_VARS[store]}/$profile
+
+  if [ ! -f $store ]; then
+    echo "No profile named ${profile} for ${EM_VARS[type]}"
+    return 1
+  fi
+
+  echo ${profile} > ${EM_VARS[default_file]}
+  echo "Default profile for ${EM_VARS[type]} set to ${profile}. Run em ${EM_VARS[type]} init to switch."
+}
+_em_command_list() {
+  echo "Available profiles for ${EM_VARS[type]}"
+  for profile in `ls ${EM_VARS[store]}`; do
+    local ind=''
+    if [ "${profile}" = "${EM_VARS[profile]}" ]; then
+      ind='='
+      [ "$profile" = "${EM_VARS[default]}" ] && ind+='*' || ind+='>'
+    else
+      ind=' '
+      [ "$profile" = "${EM_VARS[default]}" ] && ind+='*' || ind+=' '
+    fi
+
+    echo "  ${ind} ${profile}"
+  done
+  echo
+}
+
+# Setup variables used by EM (with support for custom values set by the user)
+_em_setup() {
+  EM_VARS[type]=$1
+  EM_VARS[code]=$(echo ${EM_VARS[type]} | tr '[:lower:]' '[:upper:]')
+  EM_VARS[cmd]=$2
+
+  _em_variable "store"        "EM_${EM_VARS[code]}_STORE"        "${EM_STORE}/${EM_VARS[type]}"
+  _em_variable "default_file" "EM_${EM_VARS[code]}_DEFAULT_FILE" "${EM_VARS[store]}/.default"
+  _em_variable "default"      "EM_${EM_VARS[code]}_DEFAULT"
+  _em_variable "profile"      "EM_${EM_VARS[code]}_PROFILE"
+  _em_run_hook "set_variables"
+
+  [ ! -d $EM_VARS[store] ] && mkdir -p $EM_VARS[store]
+  [ -z $EM_VARS[default] ] && [ -f $EM_VARS[default_file] ] && EM_VARS[default]=`cat $EM_VARS[default_file]`
+}
+
+# Handle evaluating a variable variable and setting it to a default value
+_em_variable() {
+  eval "EM_VARS[$1]=\$$2"
+  eval "[ -z \${EM_VARS[$1]} ] && EM_VARS[$1]=$3"
+  _em_debug "EM_VARS[$1]=${EM_VARS[$1]}"
+}
+
+_em_func_exists() {
+  declare -f -F $1 > /dev/null
+  return $?
+}
+_em_maybe_fn() {
+  if _em_func_exists $1; then
+    _em_debug "run $@"
+    eval "$@"
+    return 0
+  else
+    return 1
+  fi
+}
+_em_run_hook() {
+  local hook=_em_hook_${EM_VARS[type]}_$1
+  shift
+  _em_debug "run_hook ${hook}"
+  _em_maybe_fn $hook $@
+}
+
+_em_debug() {
+  [ ! -z $EM_DEBUG ] && [ $EM_DEBUG -eq 1 ] && echo "[EM ${EM_VARS[type]} ${EM_VARS[cmd]}] $@"
+}
+
+###
+# AWS Hooks
+###
+
+_em_defaults_aws() { # store
+  cat > $1 <<EOC
 export AWS_ACCESS_KEY=
 export AWS_SECRET_KEY=
+export AWS_ACCOUNT_ID=
+export AWS_DEFAULT_REGION=
 EOC
+}
 
-      echo "AWS account ${account} created! Edit ${store}, switch with ${COMMAND} use ${account}"
-      ;;
-    "remove")
-      local account
-      local store
+_em_hook_aws_set_variables() {
+  [ -z $EC2_HOME ]                    && export EC2_HOME="/usr/share/ec2-api-tools"
+  [ -z $AWS_AUTO_SCALING_HOME ]       && export AWS_AUTO_SCALING_HOME="/usr/share/as-api-tools"
+  [ -z $AWS_CLOUDWATCH_HOME ]         && export AWS_CLOUDWATCH_HOME="/usr/share/cloudwatch-api-tools"
+  [ -z $AWS_DEFAULT_CREDENTIAL_FILE ] && export AWS_DEFAULT_CREDENTIAL_FILE="$HOME/.ec2.creds"
+}
 
-      if [ $# -lt 1 ]; then
-        echo "Usage: ${COMMAND} remove <account>"
-        return 1
-      fi
+_em_hook_aws_use() { # profile, store
+  export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
+  export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
 
-      account=$1
-      store=${AAM_STORE}/${account}
-      shift
-
-      if [ -f $store ]; then
-        rm $store
-        return 0
-      else
-        echo "Chef profile ${account} does not exist at ${store}"
-        return 1
-      fi
-      ;;
-    "use" )
-      local account
-      local store
-
-      if [ $# -lt 1 ]; then
-        echo "Usage: ${COMMAND} use <account>"
-        return 1
-      fi
-
-      account=$1
-      shift
-
-      if [ $account = 'default' ]; then
-        if [ -z $AAM_DEFAULT ]; then
-          echo "No default account has been configured. Set one with ${COMMAND} default <account>."
-          return 1
-        fi
-        account=$AAM_DEFAULT
-      fi
-
-      store=${AAM_STORE}/${account}
-      if [ ! -f $store ]; then
-        echo "No account named ${account}"
-        return 1
-      fi
-
-      export AAM_ACCOUNT=$account
-
-      # Unset variables that may be set by the config
-      [ -z $AWS_CREDENTIAL_FILE ]   || unset AWS_CREDENTIAL_FILE
-
-      source $store
-
-      [ -z $AWS_CREDENTIAL_FILE ] && export AWS_CREDENTIAL_FILE=$AAM_DEFAULT_EC2_CREDS
-      export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
-      export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
-
-      cat > $AWS_CREDENTIAL_FILE <<EOC
+  [ -z $AWS_CREDENTIAL_FILE ] && export AWS_CREDENTIAL_FILE=$AWS_DEFAULT_CREDENTIAL_FILE
+  cat > $AWS_CREDENTIAL_FILE <<EOC
 AWSAccessKeyId=$AWS_ACCESS_KEY
 AWSSecretKey=$AWS_SECRET_KEY
 EOC
-
-      echo "Switched to account ${account}"
-      ;;
-    "do" )
-      local account
-
-      if [ $# -lt 1 ]; then
-        echo "Usage: aam do <account> <command...>"
-        return 1
-      fi
-
-      account=$1
-      store=${AAM_STORE}/${account}
-      shift
-      command=$*
-
-      if [ ! -f $store ]; then
-        echo "No account named ${account}"
-        return 1
-      fi
-
-      $SHELL -l -c "source ${EM_SCRIPT}; aam use ${account}; ${command}"
-      ;;
-    "default" )
-      local account
-
-      if [ $# -lt 1 ]; then
-        echo "Usage: aam default <account>"
-        return 1
-      fi
-
-      account=$1
-      store=${AAM_STORE}/${account}
-      shift
-
-      if [ ! -f $store ]; then
-        echo "No account named ${account}"
-        return 1
-      fi
-
-      echo $account > $AAM_DEFAULT_FILE
-      echo "Default account set to ${account}"
-      ;;
-    "list" )
-      echo
-      echo "Available accounts"
-      for account in `ls $AAM_STORE`; do
-        local ind=''
-        if [ "$account" = "$AAM_ACCOUNT" ]; then
-          ind='='
-          [ "$account" = "$AAM_DEFAULT" ] && ind+='*' || ind+='>'
-        else
-          ind=' '
-          [ "$account" = "$AAM_DEFAULT" ] && ind+='*' || ind+=' '
-        fi
-
-        echo "${ind} ${account}"
-      done
-      echo
-      echo '# => - current'
-      echo '# =* - current & default'
-      echo '#  * - default'
-      ;;
-  esac
 }
 
-############################################################################
-# CEM is a utility for managing multiple chef environments. It handles     #
-# loading a default set of variables, ensures the litany of variables      #
-# used by the tools are set and provides a mechanism for quickly switching #
-# between profiles.                                                        #
-############################################################################
-cem() {
-  APPLICATION_NAME='Chef Environment Manager'
-  COMMAND='cem'
-  if [ ! -z $1 ]; then
-    cmd=$1
-    shift
-  else
-    cmd='help'
-  fi
-  case $cmd in
-    "help" )
-      echo "${APPLICATION_NAME}"
-      echo
-      echo "Usage:"
-      echo "  ${COMMAND} help                      Show this message"
-      echo "  ${COMMAND} create <account>          Create a new AWS account"
-      echo "  ${COMMAND} remove <account>          Remove AWS account"
-      echo "  ${COMMAND} use <account>             Use the named AWS account"
-      echo "  ${COMMAND} do <account> <command...> Run a command under the given account"
-      echo "  ${COMMAND} default <account>         Set the default account"
-      echo "  ${COMMAND} list                      Show all available accounts"
-      ;;
-    "create" )
-      local account
-      local store
+_em_hook_aws_unset() { # profile, store
+  rm -f $AWS_CREDENTIAL_FILE
 
-      if [ $# -lt 1 ]; then
-        echo "Usage: ${COMMAND} create <account>"
-        return 1
-      fi
+  unset AWS_ACCESS_KEY_ID
+  unset AWS_SECRET_ACCESS_KEY
+  unset AWS_CREDENTIAL_FILE
+}
 
-      account=$1
-      store=${CEM_STORE}/${account}
-      shift
+###
+# Chef Hooks
+###
 
-      if [ -f $store ]; then
-        echo "Chef profile named ${account} already exists!"
-        return 1
-      fi
-
-       cat > $store <<EOC
-keypair_name = 
-hostname = 
+_em_defaults_chef() { # store
+  cat > $1 <<EOC
+keypair_name =
+hostname =
 protocol = 'https'
 port = 443
 EOC
-
-      echo "Chef profile ${account} created! Edit ${store}, switch with ${COMMAND} use ${account}"
-      ;;
-    "remove")
-      local account
-      local store
-
-      if [ $# -lt 1 ]; then
-        echo "Usage: ${COMMAND} remove <account>"
-        return 1
-      fi
-
-      account=$1
-      store=${CEM_STORE}/${account}
-      shift
-
-      if [ -f $store ]; then
-        rm $store
-        return 0
-      else
-        echo "Chef profile ${account} does not exist at ${store}"
-        return 1
-      fi
-      ;;
-    "use" )
-      local account
-      local store
-
-      if [ $# -lt 1 ]; then
-        echo "Usage: ${COMMAND} use <account>"
-        return 1
-      fi
-
-      account=$1
-      shift
-
-      if [ $account = 'default' ]; then
-        if [ -z $CEM_DEFAULT ]; then
-          echo "No default account has been configured. Set one with aam default <account>."
-          return 1
-        fi
-        account=$CEM_DEFAULT
-      fi
-
-      store=${CEM_STORE}/${account}
-      if [ ! -f $store ]; then
-        echo "No account named ${account}"
-        return 1
-      fi
-
-      export CEM_ACCOUNT=$account
-      export CHEF_ENV_OVERRIDE='true'
-
-      rm -f $HOME/.chef/overrides/*
-      ln -sin $store $HOME/.chef/overrides/knife-${account}.rb
-
-      echo "Switched to account ${account}"
-      ;;
-     "do" )
-       local account
-
-       if [ $# -lt 1 ]; then
-         echo "Usage: ${COMMAND} do <account> <command...>"
-         return 1
-       fi
-
-       account=$1
-       store=${CEM_STORE}/${account}
-       shift
-       command=$*
-
-       if [ ! -f $store ]; then
-         echo "No account named ${account}"
-         return 1
-       fi
-
-       $SHELL -l -c "source ${EM_SCRIPT}; ${COMMAND} use ${account}; ${command}"
-       ;;
-    "default" )
-      local account
-
-      if [ $# -lt 1 ]; then
-        echo "Usage: ${COMMAND} default <account>"
-        return 1
-      fi
-
-      account=$1
-      store=${CEM_STORE}/${account}
-      shift
-
-      if [ ! -f $store ]; then
-        echo "No account named ${account}"
-        return 1
-      fi
-
-      echo $account > $CEM_DEFAULT_FILE
-      echo "Default account set to ${account}"
-      ;;
-    "list" )
-      echo
-      echo "Available accounts"
-      for account in $(ls $CEM_STORE); do
-        local ind=''
-        if [ "$account" = "$CEM_ACCOUNT" ]; then
-          ind='='
-          [ "$account" = "$CEM_DEFAULT" ] && ind+='*' || ind+='>'
-        else
-          ind=' '
-          [ "$account" = "$CEM_DEFAULT" ] && ind+='*' || ind+=' '
-        fi
-
-        echo "${ind} ${account}"
-      done
-      echo
-      echo '# => - current'
-      echo '# =* - current & default'
-      echo '#  * - default'
-      ;;
-  esac
 }
-###############################################################################
-# SEM is a utility for managing multiple environments. It handles loading a   #
-# default set of variables, ensures the litany of variables used by the tools #
-# are set and provides a mechanism for quickly switching between profiles.    #
-############################################################################### 
-sem(){
-  APPLICATION_NAME='Shell Environment Manager'
-  COMMAND='sem'
-  if [ ! -z $1 ]; then
-    cmd=$1
-    shift
-  else
-    cmd='help'
+
+_em_command_chef_use() { # profile, store
+  if [ $# -lt 1 ]; then
+    echo "Usage: em ${EM_VARS[type]} use <profile>"
+    return 1
   fi
-  case $cmd in
-    "help" )
-      echo "${APPLICATION_NAME}"
-      echo
-      echo "Usage:"
-      echo "  ${COMMAND} help                      Show this message"
-      echo "  ${COMMAND} create <account>          Create a new AWS account"
-      echo "  ${COMMAND} remove <account>          Remove AWS account"
-      echo "  ${COMMAND} use <account>             Use the named AWS account"
-      echo "  ${COMMAND} do <account> <command...> Run a command under the given account"
-      echo "  ${COMMAND} default <account>         Set the default account"
-      echo "  ${COMMAND} list                      Show all available accounts"
-      ;;
-    "create" )
-      local account
-      local store
 
-      if [ $# -lt 1 ]; then
-        echo "Usage: ${COMMAND} create <account>"
-        return 1
-      fi
+  local profile=$1
+  local store=${EM_VARS[store]}/$profile
 
-      account=$1
-      store=${SEM_STORE}/${account}
-      shift
+  if [ "$profile" = "${EM_VARS[profile]}" ]; then
+    echo "Already on ${EM_VARS[type]} ${profile}"
+    return 0
+  fi
 
-      if [ -f $store ]; then
-        echo "Profile named ${account} already exists!"
-        return 1
-      fi
+  if [ ! -f $store ]; then
+    echo "No profile named ${profile} for ${EM_VARS[type]}"
+    return 1
+  fi
 
-      touch $store
+  em chef unset
 
-      echo "Profile ${account} created! Edit ${store}, switch with ${COMMAND} use ${account}"
-      ;;
-    "remove")
-      local account
-      local store
+  export CHEF_ENV_OVERRIDE='true'
+  ln -sin $2 $HOME/.chef/overrides/knife-${profile}.rb
 
-      if [ $# -lt 1 ]; then
-        echo "Usage: ${COMMAND} remove <account>"
-        return 1
-      fi
-
-      account=$1
-      store=${SEM_STORE}/${account}
-      shift
-
-      if [ -f $store ]; then
-        rm $store
-        return 0
-      else
-        echo "Profile ${account} does not exist at ${store}"
-        return 1
-      fi
-      ;;
-    "use" )
-      local account
-      local store
-
-      if [ $# -lt 1 ]; then
-        echo "Usage: ${COMMAND} use <account>"
-        return 1
-      fi
-
-      account=$1
-      shift
-
-      if [ $account = 'default' ]; then
-        if [ -z $SEM_DEFAULT ]; then
-          echo "No default account has been configured. Set one with aam default <account>."
-          return 1
-        fi
-        account=$SEM_DEFAULT
-      fi
-
-      store=${SEM_STORE}/${account}
-      if [ ! -f $store ]; then
-        echo "No account named ${account}"
-        return 1
-      fi
-
-      old_store=${SEM_STORE}/${SEM_ACCOUNT}
-      export SEM_ACCOUNT=$account
-      for key in $(awk -F'[#=\ ]' '$1 ~ /export/ {print $2}' ${old_store}); do
-        unset $key
-      done
-      source ${store}
-      echo "Switched to account ${account}"
-      ;;
-    "do" )
-      local account
-
-      if [ $# -lt 1 ]; then
-        echo "Usage: ${COMMAND} do <account> <command...>"
-        return 1
-      fi
-
-      account=$1
-      store=${SEM_STORE}/${account}
-      shift
-      command=$*
-
-      if [ ! -f $store ]; then
-        echo "No account named ${account}"
-        return 1
-      fi
-
-      $SHELL -l -c "source ${EM_SCRIPT}; ${COMMAND} use ${account}; ${command}"
-      ;;
-    "default" )
-      local account
-
-      if [ $# -lt 1 ]; then
-        echo "Usage: ${COMMAND} default <account>"
-        return 1
-      fi
-
-      account=$1
-      store=${SEM_STORE}/${account}
-      shift
-
-      if [ ! -f $store ]; then
-        echo "No account named ${account}"
-        return 1
-      fi
-
-      echo $account > $SEM_DEFAULT_FILE
-      echo "Default account set to ${account}"
-      ;;
-    "list" )
-      echo
-      echo "Available accounts"
-      for account in $(ls $SEM_STORE); do
-        local ind=''
-        if [ "$account" = "$SEM_ACCOUNT" ]; then
-          ind='='
-          [ "$account" = "$SEM_DEFAULT" ] && ind+='*' || ind+='>'
-        else
-          ind=' '
-          [ "$account" = "$SEM_DEFAULT" ] && ind+='*' || ind+=' '
-        fi
-
-        echo "${ind} ${account}"
-      done
-      echo
-      echo '# => - current'
-      echo '# =* - current & default'
-      echo '#  * - default'
-      ;;
-  esac
+  eval "export EM_${EM_VARS[code]}_PROFILE=$profile"
+  echo "Switched to ${EM_VARS[type]} ${profile}"
 }
-if [ -z $AAM_ACCOUNT ]; then
-  aam use default > /dev/null
-fi
 
-if [ -z $CEM_ACCOUNT ]; then
-  cem use default > /dev/null
-fi
-
-if [ -z $SEM_ACCOUNT ]; then
-  sem use default > /dev/null
-fi
+_em_hook_chef_unset() { # profile, store
+  rm -f $HOME/.chef/overrides/knife-${profile}.rb
+  unset CHEF_ENV_OVERRIDE
+}
