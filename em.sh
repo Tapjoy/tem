@@ -6,11 +6,11 @@
 [ -z $EM_STORE ] && export EM_STORE=$HOME/.em
 
 em() {
-  # Special cases that don't require a type to be set
+  # Special cases that don't require a platform to be set
   case $1 in
     'list'|'init')
-      for type in $(find $EM_STORE -depth 1 -type d); do
-        em ${type##*/} $1
+      for platform in $(find $EM_STORE -depth 1 -type d); do
+        em ${platform##*/} $1
       done
       return 0
       ;;
@@ -24,27 +24,27 @@ em() {
   declare -A EM_VARS
   _em_setup $1 $2; shift; shift;
 
-  # First we try to run _em_{type}_{cmd} then fall back to _em_{cmd}
-  _em_maybe_fn "_em_command_${EM_VARS[type]}_${EM_VARS[cmd]}" $@ || _em_maybe_fn "_em_command_${EM_VARS[cmd]}" $@
+  # First we try to run _em_{platform}_{cmd} then fall back to _em_{cmd}
+  _em_maybe_fn "_em_command_${EM_VARS[platform]}_${EM_VARS[cmd]}" $@ || _em_maybe_fn "_em_command_${EM_VARS[cmd]}" $@
 
   if [ $? -gt 0 ]; then
-    echo "Invalid command: ${EM_VARS[type]} ${EM_VARS[cmd]}!"
+    echo "Invalid command: ${EM_VARS[platform]} ${EM_VARS[cmd]}!"
     return 1
   fi
 }
 
 _em_command_help() {
-  echo "Usage: em [type] [command]"
+  echo "Usage: em [platform] [command]"
   echo
-  echo "Global Commands (no type)"
-  echo "  init                      Run init for all types found under ${EM_STORE}"
-  echo "  list                      Run list for all types found under ${EM_STORE}"
+  echo "Global Commands (no platform)"
+  echo "  init                      Run init for all platforms found under ${EM_STORE}"
+  echo "  list                      Run list for all platforms found under ${EM_STORE}"
   echo
-  echo "Default Type Commands"
+  echo "Default Platform Commands"
   echo "  init                      Load the default profile if one is set"
-  echo "  create <profile>          Create an profile for this type"
-  echo "  remove <profile>          Remove an profile from this type"
-  echo "  list                      List all profiles for this type"
+  echo "  create <profile>          Create an profile for this platform"
+  echo "  remove <profile>          Remove an profile from this platform"
+  echo "  list                      List all profiles for this platform"
   echo "  use <profile>             Use the given profile for the current shell"
   echo "  unset                     Unset the current profile and remove all variables"
   echo "  do <profile> <command...> Run a command under the given profile"
@@ -52,7 +52,7 @@ _em_command_help() {
 }
 _em_command_create() {
   if [ $# -lt 1 ]; then
-    echo "Usage: em ${EM_VARS[type]} create <profile>"
+    echo "Usage: em ${EM_VARS[platform]} create <profile>"
     return 1
   fi
 
@@ -60,21 +60,21 @@ _em_command_create() {
   local store=${EM_VARS[store]}/${profile}
 
   if [ -f $store ]; then
-    echo "${EM_VARS[type]} profile ${profile} already exists!"
+    echo "${EM_VARS[platform]} profile ${profile} already exists!"
     return 1
   fi
 
-  if ! _em_maybe_fn "_em_defaults_${EM_VARS[type]}" $store; then
-    echo "No defaults associated with ${EM_VARS[type]}, creating a blank profile."
+  if ! _em_maybe_fn "_em_defaults_${EM_VARS[platform]}" $store; then
+    echo "No defaults associated with ${EM_VARS[platform]}, creating a blank profile."
     touch $store
   fi
 
   _em_run_hook "create" $profile $store
-  echo "Profile created! Edit ${store}, switch with em ${EM_VARS[type]} use ${profile}"
+  echo "Profile created! Edit ${store}, switch with em ${EM_VARS[platform]} use ${profile}"
 }
 _em_command_remove() {
   if [ $# -lt 1 ]; then
-    echo "Usage: em ${EM_VARS[type]} remove <profile>"
+    echo "Usage: em ${EM_VARS[platform]} remove <profile>"
     return 1
   fi
 
@@ -82,12 +82,12 @@ _em_command_remove() {
   local store=${EM_VARS[store]}/${profile}
 
   if [ ! -f $store ]; then
-    echo "${EM_VARS[type]} profile ${profile} does not exist!"
+    echo "${EM_VARS[platform]} profile ${profile} does not exist!"
     return 1
   fi
 
   if [ "${EM_VARS[profile]}" = "${profile}" ]; then
-    em ${EM_VARS[type]} unset
+    em ${EM_VARS[platform]} unset
   fi
 
   rm -f $store
@@ -96,7 +96,7 @@ _em_command_remove() {
 }
 _em_command_use() {
   if [ $# -lt 1 ]; then
-    echo "Usage: em ${EM_VARS[type]} use <profile>"
+    echo "Usage: em ${EM_VARS[platform]} use <profile>"
     return 1
   fi
 
@@ -104,22 +104,22 @@ _em_command_use() {
   local store=${EM_VARS[store]}/$profile
 
   if [ "$profile" = "${EM_VARS[profile]}" ]; then
-    echo "Already on ${EM_VARS[type]} ${profile}"
+    echo "Already on ${EM_VARS[platform]} ${profile}"
     return 0
   fi
 
   if [ ! -f $store ]; then
-    echo "No profile named ${profile} for ${EM_VARS[type]}"
+    echo "No profile named ${profile} for ${EM_VARS[platform]}"
     return 1
   fi
 
-  em ${EM_VARS[type]} unset
+  em ${EM_VARS[platform]} unset
 
   source $store
   _em_run_hook "use" $profile $store
 
   eval "export EM_${EM_VARS[code]}_PROFILE=$profile"
-  echo "Switched to ${EM_VARS[type]} ${profile}"
+  echo "Switched to ${EM_VARS[platform]} ${profile}"
 }
 _em_command_unset() {
   if [ -z ${EM_VARS[profile]} ]; then
@@ -143,7 +143,7 @@ _em_command_unset() {
 }
 _em_command_do() {
   if [ $# -lt 1 ]; then
-    echo "Usage: em ${EM_VARS[type]} do <profile> <command...>"
+    echo "Usage: em ${EM_VARS[platform]} do <profile> <command...>"
     return 1
   fi
 
@@ -153,23 +153,23 @@ _em_command_do() {
   local command=$*
 
   if [ ! -f $store ]; then
-    echo "No profile named ${profile} for ${EM_VARS[type]}"
+    echo "No profile named ${profile} for ${EM_VARS[platform]}"
     return 1
   fi
 
   _em_run_hook "do" $profile $store
-  $SHELL -l -c "source ${EM_SCRIPT}; em ${EM_VARS[type]} use ${profile}; ${command}"
+  $SHELL -l -c "source ${EM_SCRIPT}; em ${EM_VARS[platform]} use ${profile}; ${command}"
 }
 _em_command_init() {
   if [ -z ${EM_VARS[profile]} ]; then
     if [ ! -z ${EM_VARS[default]} ]; then
-      em ${EM_VARS[type]} use ${EM_VARS[default]}
+      em ${EM_VARS[platform]} use ${EM_VARS[default]}
     fi
   fi
 }
 _em_command_default() {
   if [ $# -lt 1 ]; then
-    echo "Usage: em ${EM_VARS[type]} default <profile>"
+    echo "Usage: em ${EM_VARS[platform]} default <profile>"
     return 1
   fi
 
@@ -177,15 +177,15 @@ _em_command_default() {
   local store=${EM_VARS[store]}/$profile
 
   if [ ! -f $store ]; then
-    echo "No profile named ${profile} for ${EM_VARS[type]}"
+    echo "No profile named ${profile} for ${EM_VARS[platform]}"
     return 1
   fi
 
   echo ${profile} > ${EM_VARS[default_file]}
-  echo "Default profile for ${EM_VARS[type]} set to ${profile}. Run em ${EM_VARS[type]} init to switch."
+  echo "Default profile for ${EM_VARS[platform]} set to ${profile}. Run em ${EM_VARS[platform]} init to switch."
 }
 _em_command_list() {
-  echo "Available profiles for ${EM_VARS[type]}"
+  echo "Available profiles for ${EM_VARS[platform]}"
   for profile in `ls ${EM_VARS[store]}`; do
     local ind=''
     if [ "${profile}" = "${EM_VARS[profile]}" ]; then
@@ -203,11 +203,13 @@ _em_command_list() {
 
 # Setup variables used by EM (with support for custom values set by the user)
 _em_setup() {
-  EM_VARS[type]=$1
-  EM_VARS[code]=$(echo ${EM_VARS[type]} | tr '[:lower:]' '[:upper:]')
+  local platform=$1
+
+  EM_VARS[platform]=$(echo $platform | tr '[:upper:]' '[:lower:]')
+  EM_VARS[code]=$(echo $platform | tr '[:lower:]' '[:upper:]')
   EM_VARS[cmd]=$2
 
-  _em_variable "store"        "EM_${EM_VARS[code]}_STORE"        "${EM_STORE}/${EM_VARS[type]}"
+  _em_variable "store"        "EM_${EM_VARS[code]}_STORE"        "${EM_STORE}/${EM_VARS[platform]}"
   _em_variable "default_file" "EM_${EM_VARS[code]}_DEFAULT_FILE" "${EM_VARS[store]}/.default"
   _em_variable "default"      "EM_${EM_VARS[code]}_DEFAULT"
   _em_variable "profile"      "EM_${EM_VARS[code]}_PROFILE"
@@ -238,14 +240,14 @@ _em_maybe_fn() {
   fi
 }
 _em_run_hook() {
-  local hook=_em_hook_${EM_VARS[type]}_$1
+  local hook=_em_hook_${EM_VARS[platform]}_$1
   shift
   _em_debug "run_hook ${hook}"
   _em_maybe_fn $hook $@
 }
 
 _em_debug() {
-  [ ! -z $EM_DEBUG ] && [ $EM_DEBUG -eq 1 ] && echo "[EM ${EM_VARS[type]} ${EM_VARS[cmd]}] $@"
+  [ ! -z $EM_DEBUG ] && [ $EM_DEBUG -eq 1 ] && echo "[EM ${EM_VARS[platform]} ${EM_VARS[cmd]}] $@"
 }
 
 ###
@@ -302,7 +304,7 @@ EOC
 
 _em_command_chef_use() { # profile, store
   if [ $# -lt 1 ]; then
-    echo "Usage: em ${EM_VARS[type]} use <profile>"
+    echo "Usage: em ${EM_VARS[platform]} use <profile>"
     return 1
   fi
 
@@ -310,12 +312,12 @@ _em_command_chef_use() { # profile, store
   local store=${EM_VARS[store]}/$profile
 
   if [ "$profile" = "${EM_VARS[profile]}" ]; then
-    echo "Already on ${EM_VARS[type]} ${profile}"
+    echo "Already on ${EM_VARS[platform]} ${profile}"
     return 0
   fi
 
   if [ ! -f $store ]; then
-    echo "No profile named ${profile} for ${EM_VARS[type]}"
+    echo "No profile named ${profile} for ${EM_VARS[platform]}"
     return 1
   fi
 
@@ -325,7 +327,7 @@ _em_command_chef_use() { # profile, store
   ln -sin $2 $HOME/.chef/overrides/knife-${profile}.rb
 
   eval "export EM_${EM_VARS[code]}_PROFILE=$profile"
-  echo "Switched to ${EM_VARS[type]} ${profile}"
+  echo "Switched to ${EM_VARS[platform]} ${profile}"
 }
 
 _em_hook_chef_unset() { # profile, store
