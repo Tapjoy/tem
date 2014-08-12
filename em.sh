@@ -1,6 +1,12 @@
 # EM is a utility for managing multiple environment profiles. It handles loading a default set of variables, ensures
 # the litany of variables used by the tools are set and provides a mechanism for quickly switching between profiles.
 
+$SHELL --version | grep 'bash, version 3'
+if [ $? -eq 0 ]; then
+  echo "TEM does not support Bash version 3! Follow the upgrade instructions in the README to upgrade to version 4!"
+  return
+fi
+
 # Common ENV Stuff
 [ -z $EM_SCRIPT ] && export EM_SCRIPT=$0
 [ -z $EM_STORE ] && export EM_STORE=$HOME/.em
