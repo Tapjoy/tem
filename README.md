@@ -6,6 +6,29 @@ default each Platform only manages setting and unsetting of environment variable
 of hooks or custom command implementations it is possible to define more specific functionality for a given Platform
 (see AWS and Chef implementations).
 
+## Requirements
+
+A modern shell is required for this to operate. It has been tested on Bash 4.x and ZSH 5.x.
+
+**This script will not work with Bash 3.x, which OSX ships by default**
+
+### Upgrading Bash on OSX
+
+Using homebrew, follow these steps:
+
+```
+$ brew install bash
+$ sudo $EDITOR /etc/shells # Add /usr/local/bin/bash to the list of shells.
+$ chsh -s /usr/local/bin/bash
+```
+
+You will likely need to logout of your desktop completely for new terminal shells to start with the correct version. To
+check the version of bash you are using run the following:
+
+```
+$ exec $SHELL --version
+```
+
 ## Installation
 
 Installation of the script is very simple (*note: while this is a private repository you will have to grab the raw URL
