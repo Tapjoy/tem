@@ -26,7 +26,7 @@ You will likely need to logout of your desktop completely for new terminal shell
 check the version of bash you are using run the following:
 
 ```
-$ exec $SHELL --version
+$ $SHELL --version
 ```
 
 ## Installation
