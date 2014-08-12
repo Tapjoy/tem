@@ -1,165 +1,196 @@
 # The Environment Manager
 
-The Environment Manager is a set of shell functions that manages multiple environments (supports *sh, AWS, and chef). It handles setting all of the different variables required (which are inconsistent).  It also provides a mechanism for running commands under a different account without switching your local shell's context.
+Environment Manager is a shell function that assists in managing multiple environments for a Platform (eg. AWS and
+Chef). There is no predefined list of supported Platforms, any platform name may be given at any point in time. By
+default each Platform only manages setting and unsetting of environment variables defined in Profiles. Through the use
+of hooks or custom command implementations it is possible to define more specific functionality for a given Platform
+(see AWS and Chef implementations).
+
+## Requirements
+
+A modern shell is required for this to operate. It has been tested on Bash 4.x and ZSH 5.x.
+
+**This script will not work with Bash 3.x, which OSX ships by default**
+
+### Upgrading Bash on OSX
+
+Using homebrew, follow these steps:
+
+```
+$ brew install bash
+$ sudo $EDITOR /etc/shells # Add /usr/local/bin/bash to the list of shells.
+$ chsh -s /usr/local/bin/bash
+```
+
+You will likely need to logout of your desktop completely for new terminal shells to start with the correct version. To
+check the version of bash you are using run the following:
+
+```
+$ exec $SHELL --version
+```
 
 ## Installation
 
-Installation of the script is very simple:
+Installation of the script is very simple (*note: while this is a private repository you will have to grab the raw URL
+from GitHub yourself (a token is required)*):
 
 ```
 $ curl -L https://raw.github.com/tapjoy/tem/master/em.sh > ~/.em.sh
-$ echo 'source ~/.em.sh' >> ~/.bash_profile # Or .zsh_profile if you use zshell
-$ exec $SHELL
+$ cat >> ~/.bash_profile <<EOC # Or .zsh_profile if you use zsh
+source $HOME/.em.sh
+em init # Loads default Profiles for each Platform found
+EOC
 ```
 
-You should now be able to call `aam`, `cem`, and `sem`.
+Reload your shell and you will now have access to the `em` function.
+
+### Suggested Aliases
+
+AWS is an oft-used Platform in Environment Manager. To ease the use of this Platform (and provide backwards
+compatibility with the old [AAM](https://github.com/jlogsdon/aam) utility) we suggest the following alias:
+
+```shell
+alias aam='em aws'
+```
+
+## Commands
+
+```
+Usage: em [platform] [command]
+
+Global Commands (no platform)
+  init                      Run init for all platforms found under $EM_STORE
+  list                      Run list for all platforms found under $EM_STORE
+
+Default Platform Commands
+  init                      Load the default profile if one is set
+  create <profile>          Create an profile for this platform
+  remove <profile>          Remove an profile from this platform
+  list                      List all profiles for this platform
+  use <profile>             Use the given profile for the current shell
+  unset                     Unset the current profile and remove all variables
+  do <profile> <command...> Run a command under the given profile
+  default <profile>         Show all available profiles
+```
 
 ## Customization
 
-AAM uses it's own variables to define default accounts and where files should be stored. These can be overridden, but
-sane defaults are provided.
+EM uses it's own variables to define where the em.sh script itself lives and where EM Platforms and Profiles are stored.
 
 * `EM_SCRIPT` is the location of em.sh (`$0`)
 * `EM_STORE` is the folder where account definitions are stored (`$HOME/.em`).
 
-## Functions
-### AWS Account Manager
-The AWS Account Manager is a shell function that manages multiple AWS accounts and their credentials. It handles setting
-all of the different variables required by the AWS command line tools (which are inconsistent). It also provides a
-mechanism for running commands under a different account without switching your local shell's context.
+## Platforms
 
-#### Usage
+Platform names can be any word (that is, any string of characters without whitespace). EM includes hooks and custom
+commands for two Platforms: `aws` which is analogous with the AAM script EM replaces; and `chef` which manages loading
+and unloading custom `knife.rb` override files.
 
-```
-AWS Account Manager
+Throughout this file we will reference two `PLATFORM_*` variables that are defined as such: `PLATFORM_NAME` is
+lower-case normalized named used for store paths and output; `PLATFORM_CODE` is the upper-case normalized name used for
+variable names.
 
-Usage:
-  aam help                      Show this message
-  aam create <account>          Create a new AWS account
-  aam remove <account>          Remove AWS account
-  aam use <account>             Use the named AWS account
-  aam do <account> <command...> Run a command under the given account
-  aam default <account>         Set the default account
-  aam list                      Show all available accounts
-```
+There are several Platform specific variables EM uses for configuration:
 
-#### Creating an Account
+ * `EM_{$PLATFORM_CODE}_STORE` - Where EM will store the profiles for this platform. Note that moving the platform store
+    outside of the default location will make global commands unable to find the platform. (default: `$EM_STORE/$PLATFORM_NAME`)
+ * `EM_{$PLATFORM_CODE}_DEFAULT_FILE` - Where the file containing the default profile lives (default: `STORE/.default`)
+ * `EM_{$PLATFORM_CODE}_DEFAULT` - The default profile to load. If set the `DEFAULT_FILE` variable will be ignored;
+   otherwise the `DEFAULT` will be set to the contents of that file.
+ * `EM_{$PLATFORM_CODE}_PROFILE` - Which profile EM currently has (or at least thinks) is loaded into the environment.
 
-Once AAM has been installed you can start by creating and editing new account:
+## Profiles
 
-```
-$ aam create personal
-$ $EDITOR $AAM_STORE/personal
-```
+In general, a profile is simply a shell script that will be sourced by EM. To assist in unsetting these variables later,
+we suggest all variables defined use the `export VARIABLE_NAME=content` format. As we are simply sourcing the file into
+your current shell, it is also possible to include any code that would run under your shell. It is important to note
+that any of this extra code will not be automatically undone (if needed) when changing or unloading profiles.
 
-Account files are simply a list of variables which are sourced whenver you switch accounts. Anything goes as long as
-your shell can process the file. At a bare minimum the file should look like this:
+In the specific case of Chef, Profiles are actually Ruby files that will be symlinked to
+`$HOME/.chef/overrides/knife-${profile}.rb`.
 
-```
-export AWS_ACCESS_KEY=some_access_key_id
-export AWS_SECRET_KEY=some_secret_access_key
-```
+### Defaults
 
-The next section describes all of the variables AAM works with, any of which can be defined explicitly in your account
-definition.
+For a generic Platform we create an empty Profile by default. It is possible to define a function which can add default
+content to this file. To use this behavior, define a function: `_em_defaults_${PLATFORM_NAME}`. This function is passed
+in the path to the Profile store file and must manually write out to that file. See `_em_defaults_aws` for an example.
 
-#### Variables
+## Hooks
 
-Amazon's official command line tools have a huge problem with consistency. Different variables are read and, in some
-cases, a credentials file is required. The main goal for AAM, outside of making account switching simple, is to handle
-the setup of these variables and files automatically.
+Hooks are provided for a couple commands to allow easy extension of functionality. Hooks are defined as functions and
+follow the naming convention of `_em_hook_${PLATFORM_NAME}_${HOOK_NAME}`. Currently only one implementation of each hook
+is supported per Platform. The following hooks are provided for your enhancement needs (content in parentheticals are
+arguments passed into the hook):
 
-* `AWS_ACCESS_KEY` and `AWS_SECRET_KEY` are expected by AAM and several of the command line tools.
-* `AWS_ACCESS_KEY_ID` is set to `AWS_ACCESS_KEY`.
-* `AWS_SECRET_ACCESS_KEY` is set to `AWS_SECRET_KEY`.
-* `AWS_CREDENTIALS_FILE` is, by default, set to `AAM_DEFAULT_EC2_CREDS`. You may override it in your account if you
-  wish.
-* `EC2_PRIVATE_KEY` should be set to the path of your private key. This is not handled magically and should be set in
-  either your account or globally in your profile.
-* `EC2_CERT` is similar to the above but should point to your certificate file.
+ * `set_variables` - Called before any command is run and after the `EM_VARS` have been setup.
+ * `create($profile, $store_file)` - Called *after* a Profile has been created.
+ * `remove($profile, $store_file)` - Called *after* a Profile has been removed.
+ * `use($profile, $store_file)` - Called *after* a Profile has been loaded.
+ * `unset($profile, $store_file)` - Called *after* a Profile has been unloaded.
+ * `do($profile, $store_file)` - Called *before* the given command is executed under the specified profile.
 
-#### Customization
-
-AAM uses it's own variables to define default accounts and where files should be stored. These can be overridden, but
-sane defaults are provided.
-
-* `AAM_STORE` is the folder where account definitions are stored (`$EM_STORE/aws`).
-* `AAM_DEFAULT_FILE` is the file where the default account is stored (`$AAM_STORE/.default`).
-* `AAM_DEFAULT_EC2_CREDS` is the default for `AWS_CREDENTIALS_FILE` (`$HOME/.ec2.creds`).
-
-### Chef Environment Manager
-The Chef Environment Manager is a shell function that manages multiple chef environments (via knife overrides). It handles setting
-all of the different variables required by the knife command line tools. It also provides a
-mechanism for running commands under a different account without switching your local shell's context.
-
-#### Usage
-```
-Chef Environment Manager
-
-Usage:
-  cem help                      Show this message
-  cem create <account>          Create a new AWS account
-  cem remove <account>          Remove AWS account
-  cem use <account>             Use the named AWS account
-  cem do <account> <command...> Run a command under the given account
-  cem default <account>         Set the default account
-  cem list                      Show all available accounts
+```shell
+_em_hook_myp_create() {
+  echo "Profile $1 created!"
+}
 ```
 
-#### Creating an Account
+## Custom Command Handlers
 
-Once CEM has been installed you can start by creating and editing new profile override:
+While every command listed above has default implementations it is possible to provide a custom implementation for a
+specific Platform. It is also possible to define completely new commands using this convention. Custom command handlers
+should be named after the following convention: `_em_command_${PLATFORM_NAME}_${COMMAND_NAME}`. You can also define a
+generic (runs for any platform) command in the same manner, except the naming convention is:
+`_em_command_${COMMAND_NAME}`.
 
-```
-$ cem create personal
-$ $EDITOR $CEM_STORE/personal
-```
-
-Profile override files are simply a list of variables which chef references whenver you run `knife`.
-
-For profile override file reference: http://docs.opscode.com/config_rb_knife.html
-
-#### Customization
-
-CEM uses its own variables to define default profiles and where files should be stored. These can be overridden, but
-sane defaults are provided.
-
-* `CEM_STORE` is the folder where account definitions are stored (`$EM_STORE/chef`).
-* `CEM_DEFAULT_FILE` is the file where the default account is stored (`$CEM_STORE/.default`).
-
-### Shell Environment Manager
-The Shell Environment Manager is a shell function that manages multiple shell environments. It provides a
-mechanism for running commands under a different account without switching your local shell's context.  All common settings should go into your normal rc files, but special settings can go into $SEM_STORE.
-
-#### Usage
-```
-Shell Environment Manager
-
-Usage:
-  sem help                      Show this message
-  sem create <account>          Create a new AWS account
-  sem remove <account>          Remove AWS account
-  sem use <account>             Use the named AWS account
-  sem do <account> <command...> Run a command under the given account
-  sem default <account>         Set the default account
-  sem list                      Show all available accounts
+```shell
+_em_command_myp_do() {
+  # Custom `do` command for the `myp` Platform
+}
+_em_command_debug() {
+  # Custom `debug` command for *every* Platform
+}
 ```
 
-#### Creating an Account
+# Platform Details
 
-Once SEM has been installed you can start by creating and editing new profile override:
+The custom implementation details for AWS and Chef are as follows.
 
+## AWS
+
+The AWS command line tools are inconsistent in where it expects credentials to be defined. To assist the user in this
+chaos we provide automatic variable mapping for AWS Profiles.
+
+### AWS Tool Variables
+
+By default, we configure the shell to look in `/usr/share` for the AWS tools and `$HOME/.ec2.creds` for a credentials
+file. You can override these settings by setting the following variables:
+
+ * `EC2_HOME` - Where the ec2 tools live.
+ * `AWS_AUTO_SCALING_HOME` - Where the auto scaling tools live.
+ * `AWS_CLOUDWATCH_HOME` - Where the cloudwatch tools live.
+ * `AWS_DEFAULT_CREDENTIALS_FILE` - Where the default credentials file lives (can be set on a per-Profile basis).
+
+### Variable Mapping
+
+We expect two variables to be set in your AWS profile: `AWS_ACCESS_KEY` and `AWS_SECRET_KEY`. These two variables are
+then mapped to `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` automatically when a Profile is loaded.
+
+If the Profile does not define an `AWS_CREDENTIALS_FILE` variable it will be set to `AWS_DEFAULT_CREDENTIALS_FILE`.
+
+### Credentials File
+
+Some AWS tools require the Credentials File. The location of this is set using one of two variables described above, and
+the contents are automatically populated with:
+
+```shell
+AWSAccessKeyId=$AWS_ACCESS_KEY
+AWSSecretKey=$AWS_SECRET_KEY
 ```
-$ sem create personal
-$ $EDITOR $SEM_STORE/personal
-```
 
-Anything goes as long as your shell can process the file.
+## Chef
 
-#### Customization
+Chef is a special snowflake in that it does not manage environment variables, but instead handles symlinking Profiles to
+a chef overrides directory. This is a case where custom command implementations are heavily used.
 
-SEM uses its own variables to define default environments and where files should be stored. These can be overridden, but
-sane defaults are provided.
-
-* `SEM_STORE` is the folder where account definitions are stored (`$EM_STORE/env`).
-* `SEM_DEFAULT_FILE` is the file where the default account is stored (`$SEM_STORE/.default`).
+The chef overrides directory is located at `$HOME/.chef/overrides`.
