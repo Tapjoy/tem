@@ -10,12 +10,13 @@ fi
 # Common ENV Stuff
 [ -z $EM_SCRIPT ] && export EM_SCRIPT=$0
 [ -z $EM_STORE ] && export EM_STORE=$HOME/.em
+[ -d $EM_STORE ] || mkdir -p $EM_STORE
 
 em() {
   # Special cases that don't require a platform to be set
   case $1 in
     'list'|'init')
-      for platform in $(find $EM_STORE -depth 1 -type d); do
+      for platform in $(find $EM_STORE -maxdepth 1 -mindepth 1 -type d); do
         em ${platform##*/} $1
       done
       return 0
@@ -221,8 +222,8 @@ _em_setup() {
   _em_variable "profile"      "EM_${EM_VARS[code]}_PROFILE"
   _em_run_hook "set_variables"
 
-  [ ! -d $EM_VARS[store] ] && mkdir -p $EM_VARS[store]
-  [ -z $EM_VARS[default] ] && [ -f $EM_VARS[default_file] ] && EM_VARS[default]=`cat $EM_VARS[default_file]`
+  [ ! -d ${EM_VARS[store]} ] && mkdir -p ${EM_VARS[store]}
+  [ -z ${EM_VARS[default]} ] && [ -f ${EM_VARS[default_file]} ] && EM_VARS[default]=`cat ${EM_VARS[default_file]}`
 }
 
 # Handle evaluating a variable variable and setting it to a default value
