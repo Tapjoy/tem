@@ -31,8 +31,7 @@ $ $SHELL --version
 
 ## Installation
 
-Installation of the script is very simple (*note: while this is a private repository you will have to grab the raw URL
-from GitHub yourself (a token is required)*):
+Installation of the script is very simple:
 
 ```
 $ curl -L https://raw.github.com/tapjoy/tem/master/em.sh > ~/.em.sh
